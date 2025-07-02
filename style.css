@@ -58,7 +58,7 @@ label {
   color: white;
   border: 1px solid #444;
   padding: 1rem 1.5rem;
-  font-size: 1rem;
+  font-size: 20px;
   cursor: pointer;
   border-radius: 8px;
   width: fit-content;
@@ -79,4 +79,11 @@ canvas {
   height: auto;
   max-height: calc(100svh - 13rem);
   image-rendering: pixelated;
+}
+@media (max-width: 600px) {
+  #start-screen p {
+    font-size: 1.2rem;
+    padding: 0 1rem;
+  }
+
 }
