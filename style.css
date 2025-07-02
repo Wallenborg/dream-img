@@ -81,9 +81,22 @@ canvas {
   image-rendering: pixelated;
 }
 @media (max-width: 600px) {
+  header {
+    font-size: 2rem;
+  }
+
+  #start-screen h1 {
+    font-size: 2rem;
+  }
+
   #start-screen p {
-    font-size: 1.2rem;
+    font-size: 1.1rem;
     padding: 0 1rem;
   }
 
+  button,
+  label {
+    font-size: 1.1rem;
+    padding: 1.2rem 2rem;
+  }
 }
