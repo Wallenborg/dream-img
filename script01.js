@@ -54,9 +54,9 @@ toggleBtn.addEventListener("click", () => {
   if (!paused) animate();
 });
 
-resetBtn.addEventListener("click", () => {
-  window.location.reload();
-});
+// resetBtn.addEventListener("click", () => {
+//   window.location.reload();
+// });
 
 saveBtn.addEventListener("click", () => {
   const link = document.createElement("a");

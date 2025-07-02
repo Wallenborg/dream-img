@@ -161,7 +161,7 @@ label {
   color: white;
   border: 1px solid #444;
   padding: 1.4rem 2rem;
-  font-size: clamp(1.4rem, 5vw, 2rem);
+  font-size: clamp(1.4rem, 4vw, 1.4rem);
   cursor: pointer;
   border-radius: 8px;
   width: fit-content;
