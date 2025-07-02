@@ -1,4 +1,5 @@
-const MAX_AGENTS = 20;
+
+const MAX_AGENTS = 6;
 
 function createAgent() {
   const agent = {
@@ -126,10 +127,11 @@ function applyMorph(agent, imgData) {
 
 function animate() {
   if (!imageLoaded || paused) return;
+  if (agents.length === 0) agents.push(createAgent());
 
   const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-  if (agents.length < MAX_AGENTS && Math.random() < 0.1) {
+  if (agents.length < MAX_AGENTS && Math.random() < 0.02) {
     agents.push(createAgent());
   }
 
