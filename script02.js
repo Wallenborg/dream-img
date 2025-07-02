@@ -1,3 +1,5 @@
+const MAX_AGENTS = 20;
+
 function createAgent() {
   const agent = {
     x: Math.random() * canvas.width,
@@ -127,7 +129,7 @@ function animate() {
 
   const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-  if (Math.random() < 0.02 || agents.length < 1) {
+  if (agents.length < MAX_AGENTS && Math.random() < 0.1) {
     agents.push(createAgent());
   }
 
@@ -158,6 +160,16 @@ function animate() {
 
     if (agent.age > agent.lifeSpan && agents.length > 1) {
       agents.splice(i, 1);
+    } else if (agents.length === 1 && agent.age > agent.lifeSpan) {
+      // Keep one slow dream-agent alive
+      agent.age = 0;
+      agent.lifeSpan = Math.floor(Math.random() * 600 + 300);
+      agent.speed = 0.2;
+      agent.formCompactness = 0.9;
+      agent.formSize = 50;
+      agent.doColor = true;
+      agent.doDrift = false;
+      agent.doPixelZoom = false;
     }
   }
 
