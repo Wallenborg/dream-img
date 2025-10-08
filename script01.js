@@ -18,35 +18,52 @@ upload.addEventListener("change", (e) => {
   if (!file) return;
 
   const img = new Image();
- img.onload = () => {
-  const maxWidth = 1280;
-  const maxHeight = window.innerHeight * 0.7;
+  img.onload = () => {
+    // Låt bilden vara så stor som möjligt utan att förstoras.
+    // Höj maxWidth om du vill tillåta ännu större canvas (t.ex. 6000).
+    const maxWidth  = Math.max(window.innerWidth, 3000);
+    const maxHeight = Math.floor(window.innerHeight * 0.9);
 
-  let width = img.width;
-  let height = img.height;
+    let width = img.width;
+    let height = img.height;
 
-  const widthRatio = maxWidth / width;
-  const heightRatio = maxHeight / height;
-  const scale = Math.min(1, widthRatio, heightRatio);
+    // Skala NER bara om bilden är större än viewport-gränserna.
+    const widthRatio  = maxWidth  / width;
+    const heightRatio = maxHeight / height;
+    const scale = Math.min(1, widthRatio, heightRatio); // aldrig >1 (ingen uppskalning)
 
-  width = Math.floor(width * scale);
-  height = Math.floor(height * scale);
+    const cssWidth  = Math.floor(width  * scale);
+    const cssHeight = Math.floor(height * scale);
 
-  canvas.width = width;
-  canvas.height = height;
+    // HiDPI-uppritning
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width  = Math.floor(cssWidth  * dpr);
+    canvas.height = Math.floor(cssHeight * dpr);
 
-  ctx.drawImage(img, 0, 0, width, height);
+    // Sätt visuell (CSS) storlek så den inte blir “för stor” på skärmen
+    canvas.style.width  = cssWidth + "px";
+    canvas.style.height = cssHeight + "px";
 
-  imageLoaded = true;
-  startScreen.style.display = "none";
-  canvas.style.display = "block";
-  controls.style.display = "flex";
-  liveTitle.style.display = "block";
-  animate();
-};
+    // Rensa och skala kontexten till DPR
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Rita bilden i CSS-storlek (intern pixeltäthet = dpr)
+    ctx.drawImage(img, 0, 0, cssWidth, cssHeight);
+
+    imageLoaded = true;
+    if (startScreen) startScreen.style.display = "none";
+    canvas.style.display = "block";
+    if (controls) controls.style.display = "flex";
+    if (liveTitle) liveTitle.style.display = "block";
+
+    animate();
+  };
 
   img.src = URL.createObjectURL(file);
 });
+
 
 toggleBtn.addEventListener("click", () => {
   paused = !paused;
