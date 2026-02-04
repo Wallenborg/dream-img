@@ -2,32 +2,43 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Dream Machine v1.0</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header id="live-title">Dream Machine v1.0</header>
+  <div id="stage">
+    <header id="live-title">Dream Machine v1.0</header>
 
-  <div id="start-screen">
-    <p>
-      A browser-based generative system that gradually mutates a user-supplied image using autonomous agents.<br>
-      The image shifts from within—through drift, color shifts, and pixel zoom—evoking a slow, machine-driven dream state.<br><br>
-      This is an ongoing project by artist Niklas Wallenborg, exploring machine-human creativity through post-digital aesthetics.
-    </p>
-    <div class="btn-box">
-    <label for="upload" class="upload-button">Upload Your Image</label>
-    <input type="file" id="upload" accept="image/*" style="display:none" />
+    <div id="start-screen">
+      <p>
+        Dream Machine v1.0 is a browser-based generative system where autonomous agents quietly rewrite a user-supplied image over time.
+        Drift, color bleed, and sudden pixel-zoom ruptures push the picture into a slow, machine-made dream.<br><br>
+        An ongoing project by artist Niklas Wallenborg, exploring machine-human creativity through post-digital aesthetics.
+      </p>
+      <div class="btn-box">
+        <label for="upload" class="upload-button">Upload Your Image</label>
+        <input type="file" id="upload" accept="image/*" style="display:none" />
+      </div>
     </div>
-  </div>
 
-  <canvas id="canvas" style="display:none"></canvas>
-  <div id="controls" style="display:none">
-    <button id="toggle">Stop</button>
-    <label for="upload" id="reset" style="cursor: pointer;">Upload New Image</label>
-    <button id="save">Save Image</button>
+   
+    <div id="canvasWrap">
+      <canvas id="canvas" style="display:none"></canvas>
+    </div>
+
+  
+    <div id="controlsArea" style="display:none">
+      <div id="controls">
+        <button id="toggle" type="button">Stop</button>
+        <label for="upload" id="reset">Upload New Image</label>
+        <button id="save" type="button">Save Image</button>
+      </div>
+    </div>
   </div>
 
   <script src="script01.js"></script>
   <script src="script02.js"></script>
 </body>
 </html>
+
