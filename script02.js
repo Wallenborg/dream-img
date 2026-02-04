@@ -1,10 +1,9 @@
-
-const MAX_AGENTS = 6;
+const MAX_AGENTS = 8;
 
 function createAgent() {
   const agent = {
-    x: Math.random() * canvas.width,
-    y: Math.random() * canvas.height,
+    x: Math.random() * master.width,
+    y: Math.random() * master.height,
     angle: Math.random() * Math.PI * 2,
     speed: Math.random() * 1.2 + 0.4,
     age: 0,
@@ -40,7 +39,7 @@ function generateMask(x, y, cellSize, steps, compactness = 1) {
     const px = cx * cellSize;
     const py = cy * cellSize;
 
-    if (px < 0 || py < 0 || px + cellSize > canvas.width || py + cellSize > canvas.height) continue;
+    if (px < 0 || py < 0 || px + cellSize > master.width || py + cellSize > master.height) continue;
 
     shape.push({ x: px, y: py, w: cellSize, h: cellSize });
 
@@ -62,8 +61,9 @@ function generateMask(x, y, cellSize, steps, compactness = 1) {
 
 function applyMorph(agent, imgData) {
   const data = imgData.data;
-  const original = new Uint8ClampedArray(data);
+  const original = new Uint8ClampedArray(data); // (snabbfix senare: återanvänd buffer)
   const cellSize = 10;
+
   const shape = generateMask(agent.x, agent.y, cellSize, agent.formSize, agent.formCompactness);
 
   let zoomR = 0, zoomG = 0, zoomB = 0, zoomA = 255;
@@ -71,7 +71,7 @@ function applyMorph(agent, imgData) {
     const center = shape[Math.floor(Math.random() * shape.length)];
     const cx = center.x;
     const cy = center.y;
-    const i = (cy * canvas.width + cx) * 4;
+    const i = (cy * master.width + cx) * 4;
     zoomR = original[i];
     zoomG = original[i + 1];
     zoomB = original[i + 2];
@@ -86,19 +86,17 @@ function applyMorph(agent, imgData) {
         const tx = sx + agent.driftX;
         const ty = sy + agent.driftY;
 
-        if (sx < 0 || sy < 0 || sx >= canvas.width || sy >= canvas.height) continue;
+        if (sx < 0 || sy < 0 || sx >= master.width || sy >= master.height) continue;
 
-        const i = (sy * canvas.width + sx) * 4;
+        const i = (sy * master.width + sx) * 4;
+
         let r = original[i];
         let g = original[i + 1];
         let b = original[i + 2];
         let a = original[i + 3];
 
         if (agent.doPixelZoom) {
-          r = zoomR;
-          g = zoomG;
-          b = zoomB;
-          a = zoomA;
+          r = zoomR; g = zoomG; b = zoomB; a = zoomA;
         }
 
         if (agent.doColor) {
@@ -108,8 +106,8 @@ function applyMorph(agent, imgData) {
           b = Math.min(255, Math.max(0, b + shift));
         }
 
-        if (agent.doDrift && tx >= 0 && ty >= 0 && tx < canvas.width && ty < canvas.height) {
-          const ti = (ty * canvas.width + tx) * 4;
+        if (agent.doDrift && tx >= 0 && ty >= 0 && tx < master.width && ty < master.height) {
+          const ti = (ty * master.width + tx) * 4;
           r = original[ti];
           g = original[ti + 1];
           b = original[ti + 2];
@@ -127,9 +125,10 @@ function applyMorph(agent, imgData) {
 
 function animate() {
   if (!imageLoaded || paused) return;
+
   if (agents.length === 0) agents.push(createAgent());
 
-  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const imgData = mctx.getImageData(0, 0, master.width, master.height);
 
   if (agents.length < MAX_AGENTS && Math.random() < 0.02) {
     agents.push(createAgent());
@@ -147,18 +146,14 @@ function animate() {
 
     applyMorph(agent, imgData);
 
-    if (Math.random() < 0.2) {
-      agent.angle += (Math.random() - 0.5) * 0.3;
-    }
-    if (Math.random() < 0.005) {
-      agent.angle = Math.random() * Math.PI * 2;
-    }
+    if (Math.random() < 0.2) agent.angle += (Math.random() - 0.5) * 0.3;
+    if (Math.random() < 0.005) agent.angle = Math.random() * Math.PI * 2;
 
     agent.x += Math.cos(agent.angle) * agent.speed;
     agent.y += Math.sin(agent.angle) * agent.speed;
 
-    if (agent.x < 0 || agent.x > canvas.width) agent.angle = Math.PI - agent.angle;
-    if (agent.y < 0 || agent.y > canvas.height) agent.angle = -agent.angle;
+    if (agent.x < 0 || agent.x > master.width) agent.angle = Math.PI - agent.angle;
+    if (agent.y < 0 || agent.y > master.height) agent.angle = -agent.angle;
 
     if (agent.age > agent.lifeSpan && agents.length > 1) {
       agents.splice(i, 1);
@@ -175,6 +170,12 @@ function animate() {
     }
   }
 
-  ctx.putImageData(imgData, 0, 0);
+  mctx.putImageData(imgData, 0, 0);
+
+  // Update preview (nedskalad visning)
+  if (typeof window.renderPreview === "function") {
+    window.renderPreview();
+  }
+
   animationFrame = requestAnimationFrame(animate);
 }

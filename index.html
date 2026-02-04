@@ -1,33 +1,36 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Dream Machine v1.0</title>
+  <title>Dream Machine: Terminal States</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div id="stage">
-    <header id="live-title">Dream Machine v1.0</header>
+    <header id="live-title">Dream Machine v1.5</header>
 
     <div id="start-screen">
       <p>
-        Dream Machine v1.0 is a browser-based generative system where autonomous agents quietly rewrite a user-supplied image over time.
-        Drift, color bleed, and sudden pixel-zoom ruptures push the picture into a slow, machine-made dream.<br><br>
-        An ongoing project by artist Niklas Wallenborg, exploring machine-human creativity through post-digital aesthetics.
+        Dream Machine v1.0 is a browser-based generative system that processes existing images over time.<br>
+        Autonomous agents apply incremental mutations—drift, color shifts, and pixel zoom—gradually transforming each
+        source image from within.
+        <br><br>
+        An ongoing project by Niklas Wallenborg exploring machine-human creativity through post-digital aesthetics.
       </p>
+
       <div class="btn-box">
         <label for="upload" class="upload-button">Upload Your Image</label>
         <input type="file" id="upload" accept="image/*" style="display:none" />
       </div>
     </div>
 
-   
     <div id="canvasWrap">
       <canvas id="canvas" style="display:none"></canvas>
+      <canvas id="master" style="display:none"></canvas>
     </div>
 
-  
     <div id="controlsArea" style="display:none">
       <div id="controls">
         <button id="toggle" type="button">Stop</button>

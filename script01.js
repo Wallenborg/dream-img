@@ -1,49 +1,103 @@
-// script01.js (upload + layout-fit + UI)
 const upload = document.getElementById("upload");
+
+// Preview 
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
+// Master 
+const master = document.getElementById("master");
+const mctx = master.getContext("2d", { willReadFrequently: true });
+
 const startScreen = document.getElementById("start-screen");
 const canvasWrap = document.getElementById("canvasWrap");
-
 const controlsArea = document.getElementById("controlsArea");
+
 const toggleBtn = document.getElementById("toggle");
 const saveBtn = document.getElementById("save");
 
-let imageLoaded = false;
-let paused = false;
-let animationFrame = null;
+// --- DELADE GLOBALS 
+var imageLoaded = false;
+var paused = false;
+var animationFrame = null;
+var agents = [];a
 
-const agents = []; // used by script02.js
-let currentImg = null; // keep original image for resize refit
+// Preview-mått 
+var PREVIEW_CSS_W = 0;
+var PREVIEW_CSS_H = 0;
+var DPR = window.devicePixelRatio || 1;
+
+
+const EXPORT_MAX = 3000;
+
+let currentImg = null;
 
 function stopAnimation(){
   if (animationFrame) cancelAnimationFrame(animationFrame);
   animationFrame = null;
 }
 
-function fitAndDraw(img){
-  const rect = canvasWrap.getBoundingClientRect();
-  const availW = Math.floor(rect.width);
-  const availH = Math.floor(rect.height);
 
-  const scale = Math.min(availW / img.width, availH / img.height, 1); // never upscale
-  const cssW = Math.floor(img.width * scale);
-  const cssH = Math.floor(img.height * scale);
+function setupMasterFromImage(img){
+  const exportScale = Math.min(
+    1,
+    EXPORT_MAX / img.width,
+    EXPORT_MAX / img.height
+  );
 
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width  = Math.floor(cssW * dpr);
-  canvas.height = Math.floor(cssH * dpr);
+  const mw = Math.floor(img.width * exportScale);
+  const mh = Math.floor(img.height * exportScale);
 
-  canvas.style.width  = cssW + "px";
-  canvas.style.height = cssH + "px";
+  master.width = mw;
+  master.height = mh;
 
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-  ctx.drawImage(img, 0, 0, cssW, cssH);
+  mctx.setTransform(1,0,0,1,0,0);
+  mctx.clearRect(0,0,mw,mh);
+  mctx.drawImage(img, 0, 0, mw, mh);
 }
+
+
+function fitPreviewToMaster(){
+  const rect = canvasWrap.getBoundingClientRect();
+  const availW = Math.max(1, Math.floor(rect.width));
+  const availH = Math.max(1, Math.floor(rect.height));
+
+  const mw = master.width;
+  const mh = master.height;
+
+  const scale = Math.min(availW / mw, availH / mh, 1);
+
+  PREVIEW_CSS_W = Math.max(1, Math.floor(mw * scale));
+  PREVIEW_CSS_H = Math.max(1, Math.floor(mh * scale));
+
+  DPR = window.devicePixelRatio || 1;
+
+  canvas.width  = Math.floor(PREVIEW_CSS_W * DPR);
+  canvas.height = Math.floor(PREVIEW_CSS_H * DPR);
+
+  canvas.style.width  = PREVIEW_CSS_W + "px";
+  canvas.style.height = PREVIEW_CSS_H + "px";
+
+  renderPreview();
+}
+
+
+function renderPreview(){
+ 
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+
+  ctx.drawImage(
+    master,
+    0, 0, master.width, master.height,
+    0, 0, PREVIEW_CSS_W, PREVIEW_CSS_H
+  );
+}
+
+
+window.renderPreview = renderPreview;
 
 upload.addEventListener("change", (e) => {
   const file = e.target.files[0];
@@ -53,19 +107,20 @@ upload.addEventListener("change", (e) => {
   img.onload = () => {
     currentImg = img;
 
-    // Show stage elements so measurements are correct
+   
     if (startScreen) startScreen.style.display = "none";
     canvas.style.display = "block";
     controlsArea.style.display = "flex";
 
-    // Reset sim state
+ 
     imageLoaded = true;
     paused = false;
     toggleBtn.textContent = "Stop";
     agents.length = 0;
 
-    // Fit and draw
-    fitAndDraw(img);
+ 
+    setupMasterFromImage(img);
+    fitPreviewToMaster();
 
     stopAnimation();
     animate(); 
@@ -83,13 +138,13 @@ toggleBtn.addEventListener("click", () => {
 saveBtn.addEventListener("click", () => {
   const link = document.createElement("a");
   link.download = "dream-machine.png";
-  link.href = canvas.toDataURL();
+  link.href = master.toDataURL("image/png"); 
   link.click();
 });
 
-// Auto-refit on resize (keeps “never bigger than screen” promise)
+
 window.addEventListener("resize", () => {
-  if (currentImg && imageLoaded) {
-    requestAnimationFrame(() => fitAndDraw(currentImg));
+  if (imageLoaded && currentImg) {
+    requestAnimationFrame(() => fitPreviewToMaster());
   }
 });
