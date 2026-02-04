@@ -19,7 +19,7 @@ const saveBtn = document.getElementById("save");
 var imageLoaded = false;
 var paused = false;
 var animationFrame = null;
-var agents = [];a
+var agents = [];
 
 // Preview-mått 
 var PREVIEW_CSS_W = 0;
