@@ -1,7 +1,25 @@
 const MAX_AGENTS = 8;
 
+// --- "Sampler agent"
+const SAMPLER_CHANCE = 0.009;
+const SAMPLER_COOLDOWN_MIN = 25;
+const SAMPLER_COOLDOWN_MAX = 110;
+
+let samplerCooldown = 0;
+
+const hudEl = document.getElementById("agentHud");
+let hudLastUpdate = 0;
+const HUD_INTERVAL_MS = 250;
+let hudPulseUntil = 0;
+
+let AGENT_ID = 0;
+
 function createAgent() {
   const agent = {
+    id: ++AGENT_ID,
+    label: `FieldDrift@${String(AGENT_ID).padStart(2, "0")}`,
+    type: "FieldDrift",
+
     x: Math.random() * master.width,
     y: Math.random() * master.height,
     angle: Math.random() * Math.PI * 2,
@@ -15,6 +33,17 @@ function createAgent() {
   return agent;
 }
 
+function updateAgentLabel(agent) {
+  const ops = [];
+  if (agent.doColor) ops.push("Color");
+  if (agent.doDrift) ops.push("Drift");
+  if (agent.doPixelZoom) ops.push("Zoom");
+
+  const opTag = ops.length ? `+${ops.join("+")}` : "";
+  const idTag = `@${String(agent.id).padStart(2, "0")}`;
+  agent.label = `FieldDrift${opTag}${idTag}`;
+}
+
 function randomizeMood(agent) {
   agent.driftX = Math.floor(Math.random() * 9 - 4);
   agent.driftY = Math.floor(Math.random() * 9 - 4);
@@ -24,6 +53,8 @@ function randomizeMood(agent) {
   agent.doDrift = Math.random() < 0.6;
   agent.doPixelZoom = Math.random() < 0.1;
   agent.nextMoodChange = Math.floor(Math.random() * 200 + 100);
+
+  updateAgentLabel(agent);
 }
 
 function generateMask(x, y, cellSize, steps, compactness = 1) {
@@ -39,11 +70,22 @@ function generateMask(x, y, cellSize, steps, compactness = 1) {
     const px = cx * cellSize;
     const py = cy * cellSize;
 
-    if (px < 0 || py < 0 || px + cellSize > master.width || py + cellSize > master.height) continue;
+    if (
+      px < 0 ||
+      py < 0 ||
+      px + cellSize > master.width ||
+      py + cellSize > master.height
+    )
+      continue;
 
     shape.push({ x: px, y: py, w: cellSize, h: cellSize });
 
-    const dirs = [[1,0], [-1,0], [0,1], [0,-1]].sort(() => Math.random() - 0.5);
+    const dirs = [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ].sort(() => Math.random() - 0.5);
     for (const [dx, dy] of dirs) {
       if (Math.random() < compactness) {
         const nx = cx + dx;
@@ -61,12 +103,21 @@ function generateMask(x, y, cellSize, steps, compactness = 1) {
 
 function applyMorph(agent, imgData) {
   const data = imgData.data;
-  const original = new Uint8ClampedArray(data); // (snabbfix senare: återanvänd buffer)
+  const original = new Uint8ClampedArray(data);
   const cellSize = 10;
 
-  const shape = generateMask(agent.x, agent.y, cellSize, agent.formSize, agent.formCompactness);
+  const shape = generateMask(
+    agent.x,
+    agent.y,
+    cellSize,
+    agent.formSize,
+    agent.formCompactness,
+  );
 
-  let zoomR = 0, zoomG = 0, zoomB = 0, zoomA = 255;
+  let zoomR = 0,
+    zoomG = 0,
+    zoomB = 0,
+    zoomA = 255;
   if (agent.doPixelZoom && shape.length > 0) {
     const center = shape[Math.floor(Math.random() * shape.length)];
     const cx = center.x;
@@ -86,7 +137,8 @@ function applyMorph(agent, imgData) {
         const tx = sx + agent.driftX;
         const ty = sy + agent.driftY;
 
-        if (sx < 0 || sy < 0 || sx >= master.width || sy >= master.height) continue;
+        if (sx < 0 || sy < 0 || sx >= master.width || sy >= master.height)
+          continue;
 
         const i = (sy * master.width + sx) * 4;
 
@@ -96,7 +148,10 @@ function applyMorph(agent, imgData) {
         let a = original[i + 3];
 
         if (agent.doPixelZoom) {
-          r = zoomR; g = zoomG; b = zoomB; a = zoomA;
+          r = zoomR;
+          g = zoomG;
+          b = zoomB;
+          a = zoomA;
         }
 
         if (agent.doColor) {
@@ -106,7 +161,13 @@ function applyMorph(agent, imgData) {
           b = Math.min(255, Math.max(0, b + shift));
         }
 
-        if (agent.doDrift && tx >= 0 && ty >= 0 && tx < master.width && ty < master.height) {
+        if (
+          agent.doDrift &&
+          tx >= 0 &&
+          ty >= 0 &&
+          tx < master.width &&
+          ty < master.height
+        ) {
           const ti = (ty * master.width + tx) * 4;
           r = original[ti];
           g = original[ti + 1];
@@ -114,7 +175,7 @@ function applyMorph(agent, imgData) {
           a = original[ti + 3];
         }
 
-        data[i]     = r;
+        data[i] = r;
         data[i + 1] = g;
         data[i + 2] = b;
         data[i + 3] = a;
@@ -123,6 +184,124 @@ function applyMorph(agent, imgData) {
   });
 }
 
+// ----------------------------
+// Helper: clamp + smoothstep
+// ----------------------------
+function clamp(v, a, b) {
+  return Math.max(a, Math.min(b, v));
+}
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+function smoothstep(e0, e1, x) {
+  const t = clamp((x - e0) / (e1 - e0), 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+// Tiny hash-noise
+function hash2(x, y, seed) {
+  let n = (x * 374761393 + y * 668265263 + seed * 1442695041) | 0;
+  n = (n ^ (n >> 13)) | 0;
+  n = (n * 1274126177) | 0;
+  n = (n ^ (n >> 16)) | 0;
+  return (n >>> 0) / 4294967295;
+}
+
+
+
+// ----------------------------
+// Original Patch Sampler
+// ----------------------------
+function applyOriginalPatchSampler(imgData) {
+  if (!window.__ORIGINAL || !window.__ORIGINAL.data) return false;
+
+  const w = master.width;
+  const h = master.height;
+
+  const data = imgData.data;
+  const snap = new Uint8ClampedArray(data);
+  const orig = window.__ORIGINAL.data;
+
+  const patchW = Math.floor(Math.random() * 520 + 120); // 140..460
+  const patchH = Math.floor(Math.random() * 420 + 100); // 120..380
+
+  const srcCX = Math.floor(Math.random() * w);
+  const srcCY = Math.floor(Math.random() * h);
+
+  const dstCX = Math.floor(Math.random() * w);
+  const dstCY = Math.floor(Math.random() * h);
+
+  const seed = (Math.random() * 1e9) | 0;
+  const feather = Math.random() * 0.22 + 0.18; // 0.18..0.40
+  const ragged = Math.random() * 0.55 + 0.25; // 0.25..0.80
+  const opacity = Math.random() * 0.25 + 0.78; // 0.55..0.90
+
+  const halfW = (patchW / 2) | 0;
+  const halfH = (patchH / 2) | 0;
+
+  for (let oy = -halfH; oy <= halfH; oy++) {
+    const sy = srcCY + oy;
+    const dy = dstCY + oy;
+    if (sy < 0 || sy >= h || dy < 0 || dy >= h) continue;
+
+    for (let ox = -halfW; ox <= halfW; ox++) {
+      const sx = srcCX + ox;
+      const dx = dstCX + ox;
+      if (sx < 0 || sx >= w || dx < 0 || dx >= w) continue;
+
+      const nx = ox / halfW;
+      const ny = oy / halfH;
+      const radial = Math.sqrt(nx * nx + ny * ny);
+
+      const n = hash2(dx, dy, seed) * ragged;
+      const blobEdge = 1.0 + (n - ragged * 0.5) * 0.35;
+
+      if (radial > blobEdge) continue;
+
+      const edgeStart = 1.0 - feather;
+      const edgeT = smoothstep(edgeStart, 1.0, radial / blobEdge);
+      const alpha = opacity * (1.0 - edgeT);
+
+      if (alpha <= 0.001) continue;
+
+      const di = (dy * w + dx) * 4;
+      const si = (sy * w + sx) * 4;
+
+      data[di] = lerp(snap[di], orig[si], alpha);
+      data[di + 1] = lerp(snap[di + 1], orig[si + 1], alpha);
+      data[di + 2] = lerp(snap[di + 2], orig[si + 2], alpha);
+      data[di + 3] = lerp(snap[di + 3], orig[si + 3], alpha);
+    }
+  }
+
+  return true;
+}
+
+// ----------------------------
+// HUD render
+// ----------------------------
+function renderHud(nowMs) {
+  if (!hudEl) return;
+
+  const pulse = nowMs < hudPulseUntil;
+
+  const list = agents
+    .slice(0, 10)
+    .map((a) => a.label)
+    .join(" · ");
+
+  hudEl.innerHTML = `
+  <div class="hud-inner">
+    <span>Agents: ${agents.length}</span>
+    <span> — ${list}</span
+    ${pulse ? ` <span class="pulse">— SOURCE PATCH</span>` : ``}
+  </div>
+`;
+}
+
+// ----------------------------
+// Animate
+// ----------------------------
 function animate() {
   if (!imageLoaded || paused) return;
 
@@ -152,13 +331,13 @@ function animate() {
     agent.x += Math.cos(agent.angle) * agent.speed;
     agent.y += Math.sin(agent.angle) * agent.speed;
 
-    if (agent.x < 0 || agent.x > master.width) agent.angle = Math.PI - agent.angle;
+    if (agent.x < 0 || agent.x > master.width)
+      agent.angle = Math.PI - agent.angle;
     if (agent.y < 0 || agent.y > master.height) agent.angle = -agent.angle;
 
     if (agent.age > agent.lifeSpan && agents.length > 1) {
       agents.splice(i, 1);
     } else if (agents.length === 1 && agent.age > agent.lifeSpan) {
-      // Keep one slow dream-agent alive
       agent.age = 0;
       agent.lifeSpan = Math.floor(Math.random() * 600 + 300);
       agent.speed = 0.2;
@@ -167,15 +346,38 @@ function animate() {
       agent.doColor = true;
       agent.doDrift = false;
       agent.doPixelZoom = false;
+      updateAgentLabel(agent);
     }
+  }
+
+  let didSample = false;
+  if (samplerCooldown > 0) {
+    samplerCooldown--;
+  } else if (Math.random() < SAMPLER_CHANCE) {
+    didSample = applyOriginalPatchSampler(imgData);
+    samplerCooldown = Math.floor(
+      Math.random() * (SAMPLER_COOLDOWN_MAX - SAMPLER_COOLDOWN_MIN + 1) +
+        SAMPLER_COOLDOWN_MIN,
+    );
+  }
+
+  if (didSample) {
+    hudPulseUntil = performance.now() + 900;
   }
 
   mctx.putImageData(imgData, 0, 0);
 
-  // Update preview (nedskalad visning)
   if (typeof window.renderPreview === "function") {
     window.renderPreview();
   }
 
+  const now = performance.now();
+  if (now - hudLastUpdate > HUD_INTERVAL_MS) {
+    renderHud(now);
+    hudLastUpdate = now;
+  }
+
   animationFrame = requestAnimationFrame(animate);
 }
+
+window.agents = agents;

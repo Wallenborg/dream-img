@@ -4,21 +4,22 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Dream Machine: Terminal States</title>
+  <title>Dream Machine</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div id="stage">
-    <header id="live-title">Dream Machine v1.5</header>
+    <header id="live-title">Dream Machine v2.0</header>
 
     <div id="start-screen">
-      <p>
-        Dream Machine v1.0 is a browser-based generative system that processes existing images over time.<br>
-        Autonomous agents apply incremental mutations—drift, color shifts, and pixel zoom—gradually transforming each
-        source image from within.
-        <br><br>
-        An ongoing project by Niklas Wallenborg exploring machine-human creativity through post-digital aesthetics.
-      </p>
+    <p>
+  Dream Machine v2.0 is a browser-based generative system that operates on existing images over time.<br>
+  Field-based agents apply local drift, color mutation, and pixel zoom, continuously reshaping the image.
+  At irregular intervals, regions from the original source are sampled and reinjected at new positions using organic, feathered masks.
+  <br><br>
+  An ongoing project by Niklas Wallenborg exploring machine-human creativity through post-digital aesthetics.
+</p>
+
 
       <div class="btn-box">
         <label for="upload" class="upload-button">Upload Your Image</label>
@@ -30,7 +31,7 @@
       <canvas id="canvas" style="display:none"></canvas>
       <canvas id="master" style="display:none"></canvas>
     </div>
-
+    <div id="agentHud" aria-live="polite"></div>
     <div id="controlsArea" style="display:none">
       <div id="controls">
         <button id="toggle" type="button">Stop</button>
