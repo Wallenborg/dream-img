@@ -222,33 +222,43 @@ function applyOriginalPatchSampler(imgData) {
   const snap = new Uint8ClampedArray(data);
   const orig = window.__ORIGINAL.data;
 
-  const patchW = Math.floor(Math.random() * 520 + 120); // 140..460
-  const patchH = Math.floor(Math.random() * 420 + 100); // 120..380
+ 
+  const base = Math.floor(Math.random() * 520 + 140); 
+  const ratio = Math.random() * 0.25 + 0.875;        
+  const patchW = Math.floor(base * ratio);
+  const patchH = Math.floor(base / ratio);
 
+  const halfW = (patchW / 2) | 0;
+  const halfH = (patchH / 2) | 0;
+
+ 
   const srcCX = Math.floor(Math.random() * w);
   const srcCY = Math.floor(Math.random() * h);
 
   const dstCX = Math.floor(Math.random() * w);
   const dstCY = Math.floor(Math.random() * h);
 
-  const seed = (Math.random() * 1e9) | 0;
-  const feather = Math.random() * 0.22 + 0.18; // 0.18..0.40
-  const ragged = Math.random() * 0.55 + 0.25; // 0.25..0.80
-  const opacity = Math.random() * 0.25 + 0.78; // 0.55..0.90
 
-  const halfW = (patchW / 2) | 0;
-  const halfH = (patchH / 2) | 0;
+  const angle = Math.random() * Math.PI * 2;
+  const ca = Math.cos(angle);
+  const sa = Math.sin(angle);
+
+  const seed = (Math.random() * 1e9) | 0;
+  const feather = Math.random() * 0.22 + 0.18;     
+  const ragged = Math.random() * 0.55 + 0.25;      
+
+
+  const opacity = Math.min(1, Math.random() * 0.22 + 0.78);
 
   for (let oy = -halfH; oy <= halfH; oy++) {
-    const sy = srcCY + oy;
     const dy = dstCY + oy;
-    if (sy < 0 || sy >= h || dy < 0 || dy >= h) continue;
+    if (dy < 0 || dy >= h) continue;
 
     for (let ox = -halfW; ox <= halfW; ox++) {
-      const sx = srcCX + ox;
       const dx = dstCX + ox;
-      if (sx < 0 || sx >= w || dx < 0 || dx >= w) continue;
+      if (dx < 0 || dx >= w) continue;
 
+    
       const nx = ox / halfW;
       const ny = oy / halfH;
       const radial = Math.sqrt(nx * nx + ny * ny);
@@ -260,14 +270,24 @@ function applyOriginalPatchSampler(imgData) {
 
       const edgeStart = 1.0 - feather;
       const edgeT = smoothstep(edgeStart, 1.0, radial / blobEdge);
-      const alpha = opacity * (1.0 - edgeT);
 
+     
+      const alpha = Math.min(1, Math.max(0, opacity * (1.0 - edgeT)));
       if (alpha <= 0.001) continue;
+
+   
+      const rx = (ox * ca - oy * sa);
+      const ry = (ox * sa + oy * ca);
+
+      const sx = (srcCX + Math.round(rx)) | 0;
+      const sy = (srcCY + Math.round(ry)) | 0;
+
+      if (sx < 0 || sx >= w || sy < 0 || sy >= h) continue;
 
       const di = (dy * w + dx) * 4;
       const si = (sy * w + sx) * 4;
 
-      data[di] = lerp(snap[di], orig[si], alpha);
+      data[di]     = lerp(snap[di],     orig[si],     alpha);
       data[di + 1] = lerp(snap[di + 1], orig[si + 1], alpha);
       data[di + 2] = lerp(snap[di + 2], orig[si + 2], alpha);
       data[di + 3] = lerp(snap[di + 3], orig[si + 3], alpha);
