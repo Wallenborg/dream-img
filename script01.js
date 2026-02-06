@@ -1,4 +1,3 @@
-
 const upload = document.getElementById("upload");
 
 // Preview
@@ -16,12 +15,10 @@ const controlsArea = document.getElementById("controlsArea");
 const toggleBtn = document.getElementById("toggle");
 const saveBtn = document.getElementById("save");
 
-// --- DELADE GLOBALS
 var imageLoaded = false;
 var paused = false;
 var animationFrame = null;
 var agents = [];
-
 
 var PREVIEW_CSS_W = 0;
 var PREVIEW_CSS_H = 0;
@@ -127,6 +124,31 @@ function renderPreview() {
 
 window.renderPreview = renderPreview;
 
+// ---- Expose helper API to script02
+window.DM = {
+  getElapsedMs: getProcessedElapsedMs,
+  formatElapsed,
+ 
+  stopAndPause: () => {
+    if (!paused) {
+      paused = true;
+      pauseStartedMs = performance.now();
+    }
+    stopAnimation();
+  },
+  setToggleDone: () => {
+    toggleBtn.textContent = "Done";
+    toggleBtn.disabled = true;
+  },
+  saveDone: () => {
+    const tag = formatElapsed(getProcessedElapsedMs());
+    const link = document.createElement("a");
+    link.download = `dream-machine_DONE_${tag}.png`;
+    link.href = master.toDataURL("image/png");
+    link.click();
+  }
+};
+
 upload.addEventListener("change", (e) => {
   const file = e.target.files[0];
   if (!file) return;
@@ -141,6 +163,7 @@ upload.addEventListener("change", (e) => {
 
     imageLoaded = true;
     paused = false;
+    toggleBtn.disabled = false;
     toggleBtn.textContent = "Stop";
     agents.length = 0;
 
@@ -148,9 +171,8 @@ upload.addEventListener("change", (e) => {
 
     setupMasterFromImage(img);
 
-    // Freeze ORIGINAL buffer (read-only reference)
+    // Freeze ORIGINAL buffer 
     window.__ORIGINAL = mctx.getImageData(0, 0, master.width, master.height);
-
 
     fitPreviewToMaster();
 
@@ -176,9 +198,7 @@ toggleBtn.addEventListener("click", () => {
 });
 
 saveBtn.addEventListener("click", () => {
-  const elapsed = getProcessedElapsedMs();
-  const tag = formatElapsed(elapsed);
-
+  const tag = formatElapsed(getProcessedElapsedMs());
   const link = document.createElement("a");
   link.download = `dream-machine_${tag}.png`;
   link.href = master.toDataURL("image/png");

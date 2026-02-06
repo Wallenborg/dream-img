@@ -4,22 +4,62 @@ const MAX_AGENTS = 8;
 const SAMPLER_CHANCE = 0.004;
 const SAMPLER_COOLDOWN_MIN = 200;
 const SAMPLER_COOLDOWN_MAX = 600;
-
-
 let samplerCooldown = 0;
+
+
+const PATCH_FLIP_CHANCE = 0.28; 
+
+// --- RandomColor agent-event frequency
+const RANDOMCOLOR_CHANCE = 0.003; 
+const RANDOMCOLOR_COOLDOWN_MIN = 180;
+const RANDOMCOLOR_COOLDOWN_MAX = 520;
+let randomColorCooldown = 0;
+
 
 const hudEl = document.getElementById("agentHud");
 let hudLastUpdate = 0;
 const HUD_INTERVAL_MS = 250;
 let hudPulseUntil = 0;
+let hudPulseText = "";
+
+
+const statusEl = document.getElementById("statusHud");
+
+// --- DONE logic: distance from ORIGINAL + min runtime + failsafe
+const METRIC_INTERVAL_MS = 2000; // measure every 2s
+const DIST_SAMPLE_STEP = 10;
+
+// Random target per run 
+const DIST_TARGET_MIN = 0.14;
+const DIST_TARGET_MAX = 0.26;
+
+const MIN_RUNTIME_MS = 2 * 60 * 1000; 
+const FAILSAFE_MAX_MS = 120 * 60 * 1000;
+
+// --- Smooth metric
+let distEMA = 0;
+const DIST_EMA_ALPHA = 0.25;
+
+let lastMetricMs = 0;
+let done = false;
+
+let sampleIdx = null;
+let sampleCount = 0;
+
+
+let distTarget = null;
+
+
+let lastOriginalRef = null;
 
 let AGENT_ID = 0;
+
+// ---------------- Agents (FieldDrift) ----------------
 
 function createAgent() {
   const agent = {
     id: ++AGENT_ID,
     label: `FieldDrift@${String(AGENT_ID).padStart(2, "0")}`,
-    type: "FieldDrift",
 
     x: Math.random() * master.width,
     y: Math.random() * master.height,
@@ -87,6 +127,7 @@ function generateMask(x, y, cellSize, steps, compactness = 1) {
       [0, 1],
       [0, -1],
     ].sort(() => Math.random() - 0.5);
+
     for (const [dx, dy] of dirs) {
       if (Math.random() < compactness) {
         const nx = cx + dx;
@@ -101,6 +142,177 @@ function generateMask(x, y, cellSize, steps, compactness = 1) {
   }
   return shape;
 }
+
+// ---------------- Utils ----------------
+
+function clamp(v, a, b) {
+  return Math.max(a, Math.min(b, v));
+}
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+function smoothstep(e0, e1, x) {
+  const t = clamp((x - e0) / (e1 - e0), 0, 1);
+  return t * t * (3 - 2 * t);
+}
+function hash2(x, y, seed) {
+  let n = (x * 374761393 + y * 668265263 + seed * 1442695041) | 0;
+  n = (n ^ (n >> 13)) | 0;
+  n = (n * 1274126177) | 0;
+  n = (n ^ (n >> 16)) | 0;
+  return (n >>> 0) / 4294967295;
+}
+function pad3(n) {
+  return String(Math.max(0, Math.min(999, n)) | 0).padStart(3, "0");
+}
+function dreamTimeStr() {
+  if (window.DM?.formatElapsed && window.DM?.getElapsedMs) {
+    return window.DM.formatElapsed(window.DM.getElapsedMs());
+  }
+  return "";
+}
+function pulseHud(text) {
+  hudPulseText = text || "";
+  hudPulseUntil = performance.now() + 900;
+}
+
+// ---------------- SourcePatch ----------------
+
+function applyOriginalPatchSampler(imgData) {
+  if (!window.__ORIGINAL || !window.__ORIGINAL.data) return false;
+
+  const w = master.width;
+  const h = master.height;
+
+  const data = imgData.data;
+  const snap = new Uint8ClampedArray(data);
+  const orig = window.__ORIGINAL.data;
+
+  const base = Math.floor(Math.random() * 520 + 140);
+  const ratio = Math.random() * 0.25 + 0.875; // 0.875..1.125
+  const patchW = Math.floor(base * ratio);
+  const patchH = Math.floor(base / ratio);
+
+  const halfW = (patchW / 2) | 0;
+  const halfH = (patchH / 2) | 0;
+
+  const srcCX = Math.floor(Math.random() * w);
+  const srcCY = Math.floor(Math.random() * h);
+
+  const dstCX = Math.floor(Math.random() * w);
+  const dstCY = Math.floor(Math.random() * h);
+
+  const angle = Math.random() * Math.PI * 2;
+  const ca = Math.cos(angle);
+  const sa = Math.sin(angle);
+
+  const seed = (Math.random() * 1e9) | 0;
+  const feather = Math.random() * 0.22 + 0.18;
+  const ragged = Math.random() * 0.55 + 0.25;
+
+  const opacity = Math.min(1, Math.random() * 0.22 + 0.78);
+
+  // mirror flags (sometimes)
+  let flipX = false,
+    flipY = false;
+  if (Math.random() < PATCH_FLIP_CHANCE) {
+    // randomly choose X or Y (or both, rarely)
+    flipX = Math.random() < 0.5;
+    flipY = !flipX ? Math.random() < 0.5 : Math.random() < 0.2;
+  }
+
+  for (let oy = -halfH; oy <= halfH; oy++) {
+    const dy = dstCY + oy;
+    if (dy < 0 || dy >= h) continue;
+
+    for (let ox = -halfW; ox <= halfW; ox++) {
+      const dx = dstCX + ox;
+      if (dx < 0 || dx >= w) continue;
+
+      const nx = ox / halfW;
+      const ny = oy / halfH;
+      const radial = Math.sqrt(nx * nx + ny * ny);
+
+      const n = hash2(dx, dy, seed) * ragged;
+      const blobEdge = 1.0 + (n - ragged * 0.5) * 0.35;
+      if (radial > blobEdge) continue;
+
+      const edgeStart = 1.0 - feather;
+      const edgeT = smoothstep(edgeStart, 1.0, radial / blobEdge);
+
+      const alpha = Math.min(1, Math.max(0, opacity * (1.0 - edgeT)));
+      if (alpha <= 0.001) continue;
+
+      // rotate sample-space vector
+      let rx = ox * ca - oy * sa;
+      let ry = ox * sa + oy * ca;
+
+     
+      if (flipX) rx = -rx;
+      if (flipY) ry = -ry;
+
+      const sx = (srcCX + Math.round(rx)) | 0;
+      const sy = (srcCY + Math.round(ry)) | 0;
+      if (sx < 0 || sx >= w || sy < 0 || sy >= h) continue;
+
+      const di = (dy * w + dx) * 4;
+      const si = (sy * w + sx) * 4;
+
+      data[di] = lerp(snap[di], orig[si], alpha);
+      data[di + 1] = lerp(snap[di + 1], orig[si + 1], alpha);
+      data[di + 2] = lerp(snap[di + 2], orig[si + 2], alpha);
+      data[di + 3] = lerp(snap[di + 3], orig[si + 3], alpha);
+    }
+  }
+
+  return true;
+}
+
+// ---------------- RandomColor Agent-Event (ANY RGB) ----------------
+function applyRandomColorBlob(imgData) {
+  const alpha = Math.random() * 0.7 + 0.1; // 0.1 .. 0.8
+
+  const data = imgData.data;
+
+  // ANY RGB
+  const R = (Math.random() * 256) | 0;
+  const G = (Math.random() * 256) | 0;
+  const B = (Math.random() * 256) | 0;
+
+  // small pixel clusters
+  const cellSize = Math.floor(Math.random() * 5 + 6); // 6..10
+  const steps = Math.floor(Math.random() * 29 + 12); // 12..40
+  const compactness = Math.random() * 0.55 + 0.25; // 0.25..0.80
+
+  const x = Math.random() * master.width;
+  const y = Math.random() * master.height;
+
+  const shape = generateMask(x, y, cellSize, steps, compactness);
+
+  shape.forEach(({ x, y, w, h }) => {
+    for (let dy = 0; dy < h; dy++) {
+      for (let dx = 0; dx < w; dx++) {
+        const px = x + dx;
+        const py = y + dy;
+        if (px < 0 || py < 0 || px >= master.width || py >= master.height)
+          continue;
+
+        const i = (py * master.width + px) * 4;
+        const r0 = data[i];
+        const g0 = data[i + 1];
+        const b0 = data[i + 2];
+
+        data[i] = lerp(r0, R, alpha);
+        data[i + 1] = lerp(g0, G, alpha);
+        data[i + 2] = lerp(b0, B, alpha);
+      }
+    }
+  });
+
+  return true;
+}
+
+// ---------------- Morph ----------------
 
 function applyMorph(agent, imgData) {
   const data = imgData.data;
@@ -120,7 +332,7 @@ function applyMorph(agent, imgData) {
     zoomB = 0,
     zoomA = 255;
   if (agent.doPixelZoom && shape.length > 0) {
-    const center = shape[Math.floor(Math.random() * shape.length)];
+    const center = shape[(Math.random() * shape.length) | 0];
     const cx = center.x;
     const cy = center.y;
     const i = (cy * master.width + cx) * 4;
@@ -185,123 +397,70 @@ function applyMorph(agent, imgData) {
   });
 }
 
-// ----------------------------
-// Helper: clamp + smoothstep
-// ----------------------------
-function clamp(v, a, b) {
-  return Math.max(a, Math.min(b, v));
-}
-function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
-function smoothstep(e0, e1, x) {
-  const t = clamp((x - e0) / (e1 - e0), 0, 1);
-  return t * t * (3 - 2 * t);
-}
+// ---------------- Distance metric ----------------
 
-// Tiny hash-noise
-function hash2(x, y, seed) {
-  let n = (x * 374761393 + y * 668265263 + seed * 1442695041) | 0;
-  n = (n ^ (n >> 13)) | 0;
-  n = (n * 1274126177) | 0;
-  n = (n ^ (n >> 16)) | 0;
-  return (n >>> 0) / 4294967295;
-}
-
-
-
-// ----------------------------
-// Original Patch Sampler
-// ----------------------------
-function applyOriginalPatchSampler(imgData) {
-  if (!window.__ORIGINAL || !window.__ORIGINAL.data) return false;
-
+function initDistanceSampler() {
   const w = master.width;
   const h = master.height;
+  const step = DIST_SAMPLE_STEP;
 
-  const data = imgData.data;
-  const snap = new Uint8ClampedArray(data);
-  const orig = window.__ORIGINAL.data;
-
- 
-  const base = Math.floor(Math.random() * 520 + 140); 
-  const ratio = Math.random() * 0.25 + 0.875;        
-  const patchW = Math.floor(base * ratio);
-  const patchH = Math.floor(base / ratio);
-
-  const halfW = (patchW / 2) | 0;
-  const halfH = (patchH / 2) | 0;
-
- 
-  const srcCX = Math.floor(Math.random() * w);
-  const srcCY = Math.floor(Math.random() * h);
-
-  const dstCX = Math.floor(Math.random() * w);
-  const dstCY = Math.floor(Math.random() * h);
-
-
-  const angle = Math.random() * Math.PI * 2;
-  const ca = Math.cos(angle);
-  const sa = Math.sin(angle);
-
-  const seed = (Math.random() * 1e9) | 0;
-  const feather = Math.random() * 0.22 + 0.18;     
-  const ragged = Math.random() * 0.55 + 0.25;      
-
-
-  const opacity = Math.min(1, Math.random() * 0.22 + 0.78);
-
-  for (let oy = -halfH; oy <= halfH; oy++) {
-    const dy = dstCY + oy;
-    if (dy < 0 || dy >= h) continue;
-
-    for (let ox = -halfW; ox <= halfW; ox++) {
-      const dx = dstCX + ox;
-      if (dx < 0 || dx >= w) continue;
-
-    
-      const nx = ox / halfW;
-      const ny = oy / halfH;
-      const radial = Math.sqrt(nx * nx + ny * ny);
-
-      const n = hash2(dx, dy, seed) * ragged;
-      const blobEdge = 1.0 + (n - ragged * 0.5) * 0.35;
-
-      if (radial > blobEdge) continue;
-
-      const edgeStart = 1.0 - feather;
-      const edgeT = smoothstep(edgeStart, 1.0, radial / blobEdge);
-
-     
-      const alpha = Math.min(1, Math.max(0, opacity * (1.0 - edgeT)));
-      if (alpha <= 0.001) continue;
-
-   
-      const rx = (ox * ca - oy * sa);
-      const ry = (ox * sa + oy * ca);
-
-      const sx = (srcCX + Math.round(rx)) | 0;
-      const sy = (srcCY + Math.round(ry)) | 0;
-
-      if (sx < 0 || sx >= w || sy < 0 || sy >= h) continue;
-
-      const di = (dy * w + dx) * 4;
-      const si = (sy * w + sx) * 4;
-
-      data[di]     = lerp(snap[di],     orig[si],     alpha);
-      data[di + 1] = lerp(snap[di + 1], orig[si + 1], alpha);
-      data[di + 2] = lerp(snap[di + 2], orig[si + 2], alpha);
-      data[di + 3] = lerp(snap[di + 3], orig[si + 3], alpha);
+  const idx = [];
+  for (let y = 0; y < h; y += step) {
+    for (let x = 0; x < w; x += step) {
+      idx.push((y * w + x) * 4);
     }
   }
 
-  return true;
+  sampleIdx = new Uint32Array(idx);
+  sampleCount = sampleIdx.length;
 }
 
-// ----------------------------
-// HUD render
-// ----------------------------
-function renderHud(nowMs) {
+function computeDistanceFromOriginal(imgData) {
+  if (!window.__ORIGINAL || !window.__ORIGINAL.data) return 0;
+  if (!sampleIdx) initDistanceSampler();
+
+  const data = imgData.data;
+  const orig = window.__ORIGINAL.data;
+
+  let sum = 0;
+
+  // Luma + Color (good for flat images too)
+  const W_LUMA = 0.35;
+  const W_COLOR = 0.65;
+
+  for (let k = 0; k < sampleCount; k++) {
+    const i = sampleIdx[k];
+
+    const r1 = data[i],
+      g1 = data[i + 1],
+      b1 = data[i + 2];
+    const r0 = orig[i],
+      g0 = orig[i + 1],
+      b0 = orig[i + 2];
+
+    const y1 = (0.2126 * r1 + 0.7152 * g1 + 0.0722 * b1) / 255;
+    const y0 = (0.2126 * r0 + 0.7152 * g0 + 0.0722 * b0) / 255;
+    const dl = Math.abs(y1 - y0);
+
+    const dr = r1 - r0;
+    const dg = g1 - g0;
+    const db = b1 - b0;
+    const dc = Math.sqrt(dr * dr + dg * dg + db * db) / 441.67295593;
+
+    sum += W_LUMA * dl + W_COLOR * dc;
+  }
+
+  return sum / sampleCount;
+}
+
+// ---------------- HUD / DONE ----------------
+
+function setStatus(text, isDone = false) {
+  if (!statusEl) return;
+  statusEl.innerHTML = isDone ? `<span class="done">${text}</span>` : text;
+}
+
+function renderAgentHud(nowMs) {
   if (!hudEl) return;
 
   const pulse = nowMs < hudPulseUntil;
@@ -312,19 +471,61 @@ function renderHud(nowMs) {
     .join(" · ");
 
   hudEl.innerHTML = `
-  <div class="hud-inner">
-    <span>Agents: ${agents.length}</span>
-    <span> — ${list}</span
-    ${pulse ? ` <span class="pulse">— SOURCE PATCH</span>` : ``}
-  </div>
-`;
+    <div class="hud-inner">
+      <span>Agents: ${agents.length}</span>
+      <span> — ${list}</span>
+      ${pulse ? ` <span class="pulse">— ${hudPulseText}</span>` : ``}
+    </div>
+  `;
 }
 
-// ----------------------------
-// Animate
-// ----------------------------
+function markDone(reason = "DIST") {
+  if (done) return;
+  done = true;
+
+  if (window.DM?.stopAndPause) window.DM.stopAndPause();
+  if (window.DM?.setToggleDone) window.DM.setToggleDone();
+
+  const t = dreamTimeStr();
+  setStatus(`STATE: DONE | DREAM TIME: ${t}`, true);
+
+  if (window.DM?.saveDone) window.DM.saveDone();
+}
+
+// ---------------- Run reset (new image) ----------------
+
+function resetRunStateIfNewImage() {
+  if (window.__ORIGINAL && window.__ORIGINAL !== lastOriginalRef) {
+    lastOriginalRef = window.__ORIGINAL;
+
+    done = false;
+    distEMA = 0;
+    lastMetricMs = 0;
+
+    sampleIdx = null;
+    sampleCount = 0;
+
+    distTarget =
+      DIST_TARGET_MIN + Math.random() * (DIST_TARGET_MAX - DIST_TARGET_MIN);
+
+    samplerCooldown = 0;
+    randomColorCooldown = 0;
+    hudPulseUntil = 0;
+    hudPulseText = "";
+
+    AGENT_ID = 0;
+
+    setStatus(`STATE: DREAMING | DREAMING: 000% | DREAM TIME: 00m00s`);
+  }
+}
+
+// ---------------- Main loop ----------------
+
 function animate() {
   if (!imageLoaded || paused) return;
+
+  resetRunStateIfNewImage();
+  if (done) return;
 
   if (agents.length === 0) agents.push(createAgent());
 
@@ -371,20 +572,32 @@ function animate() {
     }
   }
 
-  let didSample = false;
+  // ---- Event agents: SourcePatch + RandomColor
+
+  let didPatch = false;
   if (samplerCooldown > 0) {
     samplerCooldown--;
   } else if (Math.random() < SAMPLER_CHANCE) {
-    didSample = applyOriginalPatchSampler(imgData);
+    didPatch = applyOriginalPatchSampler(imgData);
     samplerCooldown = Math.floor(
       Math.random() * (SAMPLER_COOLDOWN_MAX - SAMPLER_COOLDOWN_MIN + 1) +
         SAMPLER_COOLDOWN_MIN,
     );
   }
+  if (didPatch) pulseHud("SOURCE PATCH");
 
-  if (didSample) {
-    hudPulseUntil = performance.now() + 900;
+  let didColor = false;
+  if (randomColorCooldown > 0) {
+    randomColorCooldown--;
+  } else if (Math.random() < RANDOMCOLOR_CHANCE) {
+    didColor = applyRandomColorBlob(imgData);
+    randomColorCooldown = Math.floor(
+      Math.random() *
+        (RANDOMCOLOR_COOLDOWN_MAX - RANDOMCOLOR_COOLDOWN_MIN + 1) +
+        RANDOMCOLOR_COOLDOWN_MIN,
+    );
   }
+  if (didColor) pulseHud("RANDOM COLOR");
 
   mctx.putImageData(imgData, 0, 0);
 
@@ -393,8 +606,41 @@ function animate() {
   }
 
   const now = performance.now();
+  const elapsedMs = window.DM?.getElapsedMs ? window.DM.getElapsedMs() : 0;
+
+  if (elapsedMs >= FAILSAFE_MAX_MS) {
+    markDone("MAXTIME");
+    return;
+  }
+
+  if (now - lastMetricMs >= METRIC_INTERVAL_MS) {
+    lastMetricMs = now;
+
+    const dist = computeDistanceFromOriginal(imgData);
+    distEMA =
+      distEMA === 0
+        ? dist
+        : distEMA * (1 - DIST_EMA_ALPHA) + dist * DIST_EMA_ALPHA;
+
+    const target =
+      distTarget ??
+      DIST_TARGET_MIN + Math.random() * (DIST_TARGET_MAX - DIST_TARGET_MIN);
+    distTarget = target;
+
+    const progress = target > 0 ? Math.min(1, distEMA / target) : 0;
+    const pct = pad3(Math.floor(progress * 100));
+
+    const t = dreamTimeStr();
+    setStatus(`STATE: DREAMING | DREAMING: ${pct}% | DREAM TIME: ${t}`);
+
+    if (elapsedMs >= MIN_RUNTIME_MS && distEMA >= target) {
+      markDone("DIST");
+      return;
+    }
+  }
+
   if (now - hudLastUpdate > HUD_INTERVAL_MS) {
-    renderHud(now);
+    renderAgentHud(now);
     hudLastUpdate = now;
   }
 
