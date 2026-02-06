@@ -1,9 +1,10 @@
 const MAX_AGENTS = 8;
 
-// --- "Sampler agent"
-const SAMPLER_CHANCE = 0.009;
-const SAMPLER_COOLDOWN_MIN = 25;
-const SAMPLER_COOLDOWN_MAX = 110;
+
+const SAMPLER_CHANCE = 0.004;
+const SAMPLER_COOLDOWN_MIN = 200;
+const SAMPLER_COOLDOWN_MAX = 600;
+
 
 let samplerCooldown = 0;
 
