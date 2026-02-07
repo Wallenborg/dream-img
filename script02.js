@@ -33,7 +33,7 @@ const DIST_SAMPLE_STEP = 10;
 const DIST_TARGET_MIN = 0.14;
 const DIST_TARGET_MAX = 0.26;
 
-const MIN_RUNTIME_MS = 2 * 60 * 1000; 
+const MIN_RUNTIME_MS = 0; 
 const FAILSAFE_MAX_MS = 120 * 60 * 1000;
 
 // --- Smooth metric
@@ -489,7 +489,7 @@ function markDone(reason = "DIST") {
   const t = dreamTimeStr();
   setStatus(`STATE: DONE | DREAM TIME: ${t}`, true);
 
-  if (window.DM?.saveDone) window.DM.saveDone();
+  // if (window.DM?.saveDone) window.DM.saveDone();
 }
 
 // ---------------- Run reset (new image) ----------------
