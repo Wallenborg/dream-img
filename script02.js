@@ -7,11 +7,17 @@ let samplerCooldown = 0;
 
 const PATCH_FLIP_CHANCE = 0.28;
 
-// --- RandomColor agent-event frequency
+
 const RANDOMCOLOR_CHANCE = 0.003;
 const RANDOMCOLOR_COOLDOWN_MIN = 180;
 const RANDOMCOLOR_COOLDOWN_MAX = 520;
 let randomColorCooldown = 0;
+
+
+const EDGE_CONFUSION_CHANCE = 0.0025;
+const EDGE_CONFUSION_COOLDOWN_MIN = 220;
+const EDGE_CONFUSION_COOLDOWN_MAX = 650;
+let edgeConfusionCooldown = 0;
 
 const hudEl = document.getElementById("agentHud");
 let hudLastUpdate = 0;
@@ -215,11 +221,9 @@ function applyOriginalPatchSampler(imgData) {
 
   const opacity = Math.min(1, Math.random() * 0.22 + 0.78);
 
-  // mirror flags (sometimes)
   let flipX = false,
     flipY = false;
   if (Math.random() < PATCH_FLIP_CHANCE) {
-    // randomly choose X or Y (or both, rarely)
     flipX = Math.random() < 0.5;
     flipY = !flipX ? Math.random() < 0.5 : Math.random() < 0.2;
   }
@@ -246,7 +250,6 @@ function applyOriginalPatchSampler(imgData) {
       const alpha = Math.min(1, Math.max(0, opacity * (1.0 - edgeT)));
       if (alpha <= 0.001) continue;
 
-      // rotate sample-space vector
       let rx = ox * ca - oy * sa;
       let ry = ox * sa + oy * ca;
 
@@ -273,15 +276,12 @@ function applyOriginalPatchSampler(imgData) {
 // ---------------- RandomColor Agent-Event (ANY RGB) ----------------
 function applyRandomColorBlob(imgData) {
   const alpha = Math.random() * 0.7 + 0.1; // 0.1 .. 0.8
-
   const data = imgData.data;
 
-  // ANY RGB
   const R = (Math.random() * 256) | 0;
   const G = (Math.random() * 256) | 0;
   const B = (Math.random() * 256) | 0;
 
-  // small pixel clusters
   const cellSize = Math.floor(Math.random() * 5 + 6); // 6..10
   const steps = Math.floor(Math.random() * 29 + 12); // 12..40
   const compactness = Math.random() * 0.55 + 0.25; // 0.25..0.80
@@ -314,6 +314,70 @@ function applyRandomColorBlob(imgData) {
   return true;
 }
 
+
+function applyEdgeConfusion(imgData) {
+  const w = master.width;
+  const h = master.height;
+  const data = imgData.data;
+
+  const cellSize = Math.floor(Math.random() * 5 + 6); // 6..10
+  const steps = Math.floor(Math.random() * 34 + 18); // 18..51
+  const compactness = Math.random() * 0.55 + 0.35; // 0.35..0.90
+
+  const x = Math.random() * w;
+  const y = Math.random() * h;
+  const shape = generateMask(x, y, cellSize, steps, compactness);
+
+  const EDGE_THRESHOLD = 28 + Math.random() * 38; // 28..66
+  const SHIFT = Math.random() < 0.5 ? 1 : 2; // 1..2
+  const strength = 0.35 + Math.random() * 0.45; // 0.35..0.80
+
+  const snap = new Uint8ClampedArray(data);
+
+  for (const cell of shape) {
+    for (let dy = 0; dy < cell.h; dy++) {
+      const py = cell.y + dy;
+      if (py <= 0 || py >= h - 1) continue;
+
+      for (let dx = 0; dx < cell.w; dx++) {
+        const px = cell.x + dx;
+        if (px <= 0 || px >= w - 1) continue;
+
+        const i = (py * w + px) * 4;
+        const ir = i + 4;
+        const id = i + w * 4;
+
+        const dr =
+          Math.abs(snap[i] - snap[ir]) +
+          Math.abs(snap[i + 1] - snap[ir + 1]) +
+          Math.abs(snap[i + 2] - snap[ir + 2]);
+
+        const dd =
+          Math.abs(snap[i] - snap[id]) +
+          Math.abs(snap[i + 1] - snap[id + 1]) +
+          Math.abs(snap[i + 2] - snap[id + 2]);
+
+        const edge = Math.max(dr, dd);
+        if (edge < EDGE_THRESHOLD) continue;
+
+        const useRight = dr >= dd;
+        const tx = px + (useRight ? SHIFT : 0);
+        const ty = py + (useRight ? 0 : SHIFT);
+        if (tx < 0 || tx >= w || ty < 0 || ty >= h) continue;
+
+        const ti = (ty * w + tx) * 4;
+
+        data[ti] = lerp(snap[ti], snap[i], strength);
+        data[ti + 1] = lerp(snap[ti + 1], snap[i + 1], strength);
+        data[ti + 2] = lerp(snap[ti + 2], snap[i + 2], strength);
+        data[ti + 3] = lerp(snap[ti + 3], snap[i + 3], strength);
+      }
+    }
+  }
+
+  return true;
+}
+
 // ---------------- Morph ----------------
 
 function applyMorph(agent, imgData) {
@@ -326,7 +390,7 @@ function applyMorph(agent, imgData) {
     agent.y,
     cellSize,
     agent.formSize,
-    agent.formCompactness,
+    agent.formCompactness
   );
 
   let zoomR = 0,
@@ -426,7 +490,6 @@ function computeDistanceFromOriginal(imgData) {
 
   let sum = 0;
 
-  // Luma + Color (good for flat images too)
   const W_LUMA = 0.35;
   const W_COLOR = 0.65;
 
@@ -492,7 +555,7 @@ function markDone(reason = "DIST") {
   const sleep = sleepStageFromTarget(distTarget);
   setStatus(`STATE: DONE | SLEEP MODE: ${sleep} | DREAM TIME: ${t}`, true);
 
-  // if (window.DM?.saveDone) window.DM.saveDone();
+  
 }
 
 // ---------------- Run reset (new image) ----------------
@@ -513,6 +576,8 @@ function resetRunStateIfNewImage() {
 
     samplerCooldown = 0;
     randomColorCooldown = 0;
+    edgeConfusionCooldown = 0; 
+
     hudPulseUntil = 0;
     hudPulseText = "";
 
@@ -520,7 +585,7 @@ function resetRunStateIfNewImage() {
 
     const sleep = sleepStageFromTarget(distTarget);
     setStatus(
-      `STATE: DREAMING | SLEEP MODE: ${sleep} | DREAMING: 000% | DREAM TIME: 00m00s`,
+      `STATE: DREAMING | SLEEP MODE: ${sleep} | DREAMING: 000% | DREAM TIME: 00m00s`
     );
   }
 }
@@ -578,7 +643,7 @@ function animate() {
     }
   }
 
-  // ---- Event agents: SourcePatch + RandomColor
+  // ---- Event agents: SourcePatch + RandomColor + EdgeConfusion
 
   let didPatch = false;
   if (samplerCooldown > 0) {
@@ -587,7 +652,7 @@ function animate() {
     didPatch = applyOriginalPatchSampler(imgData);
     samplerCooldown = Math.floor(
       Math.random() * (SAMPLER_COOLDOWN_MAX - SAMPLER_COOLDOWN_MIN + 1) +
-        SAMPLER_COOLDOWN_MIN,
+        SAMPLER_COOLDOWN_MIN
     );
   }
   if (didPatch) pulseHud("SOURCE PATCH");
@@ -600,10 +665,24 @@ function animate() {
     randomColorCooldown = Math.floor(
       Math.random() *
         (RANDOMCOLOR_COOLDOWN_MAX - RANDOMCOLOR_COOLDOWN_MIN + 1) +
-        RANDOMCOLOR_COOLDOWN_MIN,
+        RANDOMCOLOR_COOLDOWN_MIN
     );
   }
   if (didColor) pulseHud("RANDOM COLOR");
+
+  
+  let didEdge = false;
+  if (edgeConfusionCooldown > 0) {
+    edgeConfusionCooldown--;
+  } else if (Math.random() < EDGE_CONFUSION_CHANCE) {
+    didEdge = applyEdgeConfusion(imgData);
+    edgeConfusionCooldown = Math.floor(
+      Math.random() *
+        (EDGE_CONFUSION_COOLDOWN_MAX - EDGE_CONFUSION_COOLDOWN_MIN + 1) +
+        EDGE_CONFUSION_COOLDOWN_MIN
+    );
+  }
+  if (didEdge) pulseHud("EDGE CONFUSION");
 
   mctx.putImageData(imgData, 0, 0);
 
@@ -639,7 +718,7 @@ function animate() {
     const t = dreamTimeStr();
     const sleep = sleepStageFromTarget(distTarget);
     setStatus(
-      `STATE: DREAMING | SLEEP MODE: ${sleep} | DREAMING: ${pct}% | DREAM TIME: ${t}`,
+      `STATE: DREAMING | SLEEP MODE: ${sleep} | DREAMING: ${pct}% | DREAM TIME: ${t}`
     );
 
     if (elapsedMs >= MIN_RUNTIME_MS && distEMA >= target) {
@@ -657,3 +736,4 @@ function animate() {
 }
 
 window.agents = agents;
+
