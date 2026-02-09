@@ -28,7 +28,7 @@ const EXPORT_MAX = 3000;
 
 let currentImg = null;
 
-// --- PROCESS TIMER 
+// --- PROCESS TIMER
 let processStartMs = null;
 let pauseStartedMs = null;
 let pausedAccumMs = 0;
@@ -43,10 +43,9 @@ function getProcessedElapsedMs() {
   if (!processStartMs) return 0;
 
   const now = performance.now();
-  const activePausedMs =
-    paused && pauseStartedMs ? (now - pauseStartedMs) : 0;
+  const activePausedMs = paused && pauseStartedMs ? now - pauseStartedMs : 0;
 
-  return Math.max(0, (now - processStartMs) - (pausedAccumMs + activePausedMs));
+  return Math.max(0, now - processStartMs - (pausedAccumMs + activePausedMs));
 }
 
 function formatElapsed(ms) {
@@ -70,7 +69,7 @@ function setupMasterFromImage(img) {
   const exportScale = Math.min(
     1,
     EXPORT_MAX / img.width,
-    EXPORT_MAX / img.height
+    EXPORT_MAX / img.height,
   );
 
   const mw = Math.floor(img.width * exportScale);
@@ -117,8 +116,14 @@ function renderPreview() {
 
   ctx.drawImage(
     master,
-    0, 0, master.width, master.height,
-    0, 0, PREVIEW_CSS_W, PREVIEW_CSS_H
+    0,
+    0,
+    master.width,
+    master.height,
+    0,
+    0,
+    PREVIEW_CSS_W,
+    PREVIEW_CSS_H,
   );
 }
 
@@ -128,7 +133,7 @@ window.renderPreview = renderPreview;
 window.DM = {
   getElapsedMs: getProcessedElapsedMs,
   formatElapsed,
- 
+
   stopAndPause: () => {
     if (!paused) {
       paused = true;
@@ -143,10 +148,11 @@ window.DM = {
   saveDone: () => {
     const tag = formatElapsed(getProcessedElapsedMs());
     const link = document.createElement("a");
-    link.download = `dream-machine_DONE_${tag}.png`;
+    const mode = window.DM?.getSleepMode ? window.DM.getSleepMode() : "UNK";
+    link.download = `dream-machine_DONE_${mode}_${tag}.png`;
     link.href = master.toDataURL("image/png");
     link.click();
-  }
+  },
 };
 
 upload.addEventListener("change", (e) => {
@@ -171,7 +177,7 @@ upload.addEventListener("change", (e) => {
 
     setupMasterFromImage(img);
 
-    // Freeze ORIGINAL buffer 
+    // Freeze ORIGINAL buffer
     window.__ORIGINAL = mctx.getImageData(0, 0, master.width, master.height);
 
     fitPreviewToMaster();
@@ -189,7 +195,7 @@ toggleBtn.addEventListener("click", () => {
   if (paused) {
     pauseStartedMs = performance.now();
   } else {
-    if (pauseStartedMs) pausedAccumMs += (performance.now() - pauseStartedMs);
+    if (pauseStartedMs) pausedAccumMs += performance.now() - pauseStartedMs;
     pauseStartedMs = null;
   }
 
@@ -200,7 +206,8 @@ toggleBtn.addEventListener("click", () => {
 saveBtn.addEventListener("click", () => {
   const tag = formatElapsed(getProcessedElapsedMs());
   const link = document.createElement("a");
-  link.download = `dream-machine_${tag}.png`;
+  const mode = window.DM?.getSleepMode ? window.DM.getSleepMode() : "UNK";
+  link.download = `dream-machine_${mode}_${tag}.png`;
   link.href = master.toDataURL("image/png");
   link.click();
 });
@@ -210,4 +217,3 @@ window.addEventListener("resize", () => {
     requestAnimationFrame(() => fitPreviewToMaster());
   }
 });
-

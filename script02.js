@@ -735,5 +735,9 @@ function animate() {
   animationFrame = requestAnimationFrame(animate);
 }
 
+window.DM = window.DM || {};
+window.DM.getSleepMode = () => sleepStageFromTarget(distTarget);
+
+
 window.agents = agents;
 
