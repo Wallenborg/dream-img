@@ -1,20 +1,17 @@
 const MAX_AGENTS = 8;
 
-
 const SAMPLER_CHANCE = 0.004;
 const SAMPLER_COOLDOWN_MIN = 200;
 const SAMPLER_COOLDOWN_MAX = 600;
 let samplerCooldown = 0;
 
-
-const PATCH_FLIP_CHANCE = 0.28; 
+const PATCH_FLIP_CHANCE = 0.28;
 
 // --- RandomColor agent-event frequency
-const RANDOMCOLOR_CHANCE = 0.003; 
+const RANDOMCOLOR_CHANCE = 0.003;
 const RANDOMCOLOR_COOLDOWN_MIN = 180;
 const RANDOMCOLOR_COOLDOWN_MAX = 520;
 let randomColorCooldown = 0;
-
 
 const hudEl = document.getElementById("agentHud");
 let hudLastUpdate = 0;
@@ -22,18 +19,17 @@ const HUD_INTERVAL_MS = 250;
 let hudPulseUntil = 0;
 let hudPulseText = "";
 
-
 const statusEl = document.getElementById("statusHud");
 
 // --- DONE logic: distance from ORIGINAL + min runtime + failsafe
 const METRIC_INTERVAL_MS = 2000; // measure every 2s
 const DIST_SAMPLE_STEP = 10;
 
-// Random target per run 
+// Random target per run
 const DIST_TARGET_MIN = 0.08;
 const DIST_TARGET_MAX = 0.26;
 
-const MIN_RUNTIME_MS = 0; 
+const MIN_RUNTIME_MS = 0;
 const FAILSAFE_MAX_MS = 120 * 60 * 1000;
 
 // --- Smooth metric
@@ -46,9 +42,7 @@ let done = false;
 let sampleIdx = null;
 let sampleCount = 0;
 
-
 let distTarget = null;
-
 
 let lastOriginalRef = null;
 
@@ -175,6 +169,15 @@ function pulseHud(text) {
   hudPulseText = text || "";
   hudPulseUntil = performance.now() + 900;
 }
+function sleepStageFromTarget(target) {
+  if (target == null) return "—";
+  const tRaw = (target - DIST_TARGET_MIN) / (DIST_TARGET_MAX - DIST_TARGET_MIN);
+  const t = clamp(tRaw, 0, 1);
+
+  if (t < 0.33) return "LOW";
+  if (t < 0.66) return "MID";
+  return "HIGH";
+}
 
 // ---------------- SourcePatch ----------------
 
@@ -247,7 +250,6 @@ function applyOriginalPatchSampler(imgData) {
       let rx = ox * ca - oy * sa;
       let ry = ox * sa + oy * ca;
 
-     
       if (flipX) rx = -rx;
       if (flipY) ry = -ry;
 
@@ -487,7 +489,8 @@ function markDone(reason = "DIST") {
   if (window.DM?.setToggleDone) window.DM.setToggleDone();
 
   const t = dreamTimeStr();
-  setStatus(`STATE: DONE | DREAM TIME: ${t}`, true);
+  const sleep = sleepStageFromTarget(distTarget);
+  setStatus(`STATE: DONE | SLEEP MODE: ${sleep} | DREAM TIME: ${t}`, true);
 
   // if (window.DM?.saveDone) window.DM.saveDone();
 }
@@ -515,7 +518,10 @@ function resetRunStateIfNewImage() {
 
     AGENT_ID = 0;
 
-    setStatus(`STATE: DREAMING | DREAMING: 000% | DREAM TIME: 00m00s`);
+    const sleep = sleepStageFromTarget(distTarget);
+    setStatus(
+      `STATE: DREAMING | SLEEP MODE: ${sleep} | DREAMING: 000% | DREAM TIME: 00m00s`,
+    );
   }
 }
 
@@ -631,7 +637,10 @@ function animate() {
     const pct = pad3(Math.floor(progress * 100));
 
     const t = dreamTimeStr();
-    setStatus(`STATE: DREAMING | DREAMING: ${pct}% | DREAM TIME: ${t}`);
+    const sleep = sleepStageFromTarget(distTarget);
+    setStatus(
+      `STATE: DREAMING | SLEEP MODE: ${sleep} | DREAMING: ${pct}% | DREAM TIME: ${t}`,
+    );
 
     if (elapsedMs >= MIN_RUNTIME_MS && distEMA >= target) {
       markDone("DIST");
