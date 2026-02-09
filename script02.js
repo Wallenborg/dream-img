@@ -30,7 +30,7 @@ const METRIC_INTERVAL_MS = 2000; // measure every 2s
 const DIST_SAMPLE_STEP = 10;
 
 // Random target per run 
-const DIST_TARGET_MIN = 0.14;
+const DIST_TARGET_MIN = 0.08;
 const DIST_TARGET_MAX = 0.26;
 
 const MIN_RUNTIME_MS = 0; 
