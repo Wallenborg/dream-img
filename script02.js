@@ -1,4 +1,6 @@
-const MAX_AGENTS = 8;
+const TIME_SCALE = 0.7; 
+
+const MAX_AGENTS = 6;
 
 const SAMPLER_CHANCE = 0.004;
 const SAMPLER_COOLDOWN_MIN = 200;
@@ -7,17 +9,27 @@ let samplerCooldown = 0;
 
 const PATCH_FLIP_CHANCE = 0.28;
 
-
 const RANDOMCOLOR_CHANCE = 0.003;
 const RANDOMCOLOR_COOLDOWN_MIN = 180;
 const RANDOMCOLOR_COOLDOWN_MAX = 520;
 let randomColorCooldown = 0;
 
-
 const EDGE_CONFUSION_CHANCE = 0.0025;
 const EDGE_CONFUSION_COOLDOWN_MIN = 220;
 const EDGE_CONFUSION_COOLDOWN_MAX = 650;
 let edgeConfusionCooldown = 0;
+
+/* ---------------- Temporal Echo Agent ---------------- */
+const ECHO_CHANCE = 0.0022;
+const ECHO_COOLDOWN_MIN = 240;
+const ECHO_COOLDOWN_MAX = 680;
+let echoCooldown = 0;
+
+const ECHO_BUFFER_MAX = 10;
+const ECHO_STORE_EVERY = 2;
+let echoStoreCounter = 0;
+
+let echoBuffer = []; 
 
 const hudEl = document.getElementById("agentHud");
 let hudLastUpdate = 0;
@@ -27,16 +39,15 @@ let hudPulseText = "";
 
 const statusEl = document.getElementById("statusHud");
 
-// --- DONE logic: distance from ORIGINAL + min runtime + failsafe
-const METRIC_INTERVAL_MS = 2000; // measure every 2s
+// --- DONE logic: distance from ORIGINAL 
+const METRIC_INTERVAL_MS = 2000; 
 const DIST_SAMPLE_STEP = 10;
 
-// Random target per run
 const DIST_TARGET_MIN = 0.08;
 const DIST_TARGET_MAX = 0.26;
 
 const MIN_RUNTIME_MS = 0;
-const FAILSAFE_MAX_MS = 120 * 60 * 1000;
+const FAILSAFE_MAX_MS = 240 * 60 * 1000;
 
 // --- Smooth metric
 let distEMA = 0;
@@ -49,7 +60,6 @@ let sampleIdx = null;
 let sampleCount = 0;
 
 let distTarget = null;
-
 let lastOriginalRef = null;
 
 let AGENT_ID = 0;
@@ -198,7 +208,7 @@ function applyOriginalPatchSampler(imgData) {
   const orig = window.__ORIGINAL.data;
 
   const base = Math.floor(Math.random() * 520 + 140);
-  const ratio = Math.random() * 0.25 + 0.875; // 0.875..1.125
+  const ratio = Math.random() * 0.25 + 0.875;
   const patchW = Math.floor(base * ratio);
   const patchH = Math.floor(base / ratio);
 
@@ -275,16 +285,16 @@ function applyOriginalPatchSampler(imgData) {
 
 // ---------------- RandomColor Agent-Event (ANY RGB) ----------------
 function applyRandomColorBlob(imgData) {
-  const alpha = Math.random() * 0.7 + 0.1; // 0.1 .. 0.8
+  const alpha = Math.random() * 0.7 + 0.1;
   const data = imgData.data;
 
   const R = (Math.random() * 256) | 0;
   const G = (Math.random() * 256) | 0;
   const B = (Math.random() * 256) | 0;
 
-  const cellSize = Math.floor(Math.random() * 5 + 6); // 6..10
-  const steps = Math.floor(Math.random() * 29 + 12); // 12..40
-  const compactness = Math.random() * 0.55 + 0.25; // 0.25..0.80
+  const cellSize = Math.floor(Math.random() * 5 + 6);
+  const steps = Math.floor(Math.random() * 29 + 12);
+  const compactness = Math.random() * 0.55 + 0.25;
 
   const x = Math.random() * master.width;
   const y = Math.random() * master.height;
@@ -314,23 +324,22 @@ function applyRandomColorBlob(imgData) {
   return true;
 }
 
-
 function applyEdgeConfusion(imgData) {
   const w = master.width;
   const h = master.height;
   const data = imgData.data;
 
-  const cellSize = Math.floor(Math.random() * 5 + 6); // 6..10
-  const steps = Math.floor(Math.random() * 34 + 18); // 18..51
-  const compactness = Math.random() * 0.55 + 0.35; // 0.35..0.90
+  const cellSize = Math.floor(Math.random() * 5 + 6);
+  const steps = Math.floor(Math.random() * 34 + 18);
+  const compactness = Math.random() * 0.55 + 0.35;
 
   const x = Math.random() * w;
   const y = Math.random() * h;
   const shape = generateMask(x, y, cellSize, steps, compactness);
 
-  const EDGE_THRESHOLD = 28 + Math.random() * 38; // 28..66
-  const SHIFT = Math.random() < 0.5 ? 1 : 2; // 1..2
-  const strength = 0.35 + Math.random() * 0.45; // 0.35..0.80
+  const EDGE_THRESHOLD = 28 + Math.random() * 38;
+  const SHIFT = Math.random() < 0.5 ? 1 : 2;
+  const strength = 0.35 + Math.random() * 0.45;
 
   const snap = new Uint8ClampedArray(data);
 
@@ -372,6 +381,77 @@ function applyEdgeConfusion(imgData) {
         data[ti + 2] = lerp(snap[ti + 2], snap[i + 2], strength);
         data[ti + 3] = lerp(snap[ti + 3], snap[i + 3], strength);
       }
+    }
+  }
+
+  return true;
+}
+
+/* ---------------- Temporal Echo ---------------- */
+
+function storeEchoFrame(imgData) {
+  echoStoreCounter++;
+  if (echoStoreCounter % ECHO_STORE_EVERY !== 0) return;
+
+  echoBuffer.push({
+    w: master.width,
+    h: master.height,
+    data: new Uint8ClampedArray(imgData.data),
+  });
+
+  if (echoBuffer.length > ECHO_BUFFER_MAX) echoBuffer.shift();
+}
+
+function applyTemporalEcho(imgData) {
+  if (echoBuffer.length < 3) return false;
+
+  const w = master.width;
+  const h = master.height;
+  const data = imgData.data;
+
+  const maxIdx = echoBuffer.length - 2;
+  const pickIdx = Math.floor(Math.random() * maxIdx);
+  const past = echoBuffer[pickIdx];
+  if (!past || !past.data) return false;
+
+  const rw = clamp(Math.floor(Math.random() * 240 + 90), 40, w);
+  const rh = clamp(Math.floor(Math.random() * 240 + 90), 40, h);
+
+  const x0 = Math.floor(Math.random() * Math.max(1, w - rw));
+  const y0 = Math.floor(Math.random() * Math.max(1, h - rh));
+
+  const feather = Math.floor(Math.random() * 28 + 12);
+  const strength = 0.10 + Math.random() * 0.22;
+
+  const offX = Math.floor(Math.random() * 9 - 4);
+  const offY = Math.floor(Math.random() * 9 - 4);
+
+  for (let oy = 0; oy < rh; oy++) {
+    const y = y0 + oy;
+
+    const topFade = feather > 0 ? clamp(oy / feather, 0, 1) : 1;
+    const botFade = feather > 0 ? clamp((rh - 1 - oy) / feather, 0, 1) : 1;
+    const fy = Math.min(topFade, botFade);
+
+    for (let ox = 0; ox < rw; ox++) {
+      const x = x0 + ox;
+
+      const leftFade = feather > 0 ? clamp(ox / feather, 0, 1) : 1;
+      const rightFade = feather > 0 ? clamp((rw - 1 - ox) / feather, 0, 1) : 1;
+      const fx = Math.min(leftFade, rightFade);
+
+      const a = strength * fx * fy;
+      if (a <= 0.001) continue;
+
+      const sx = clamp(x + offX, 0, w - 1);
+      const sy = clamp(y + offY, 0, h - 1);
+
+      const di = (y * w + x) * 4;
+      const si = (sy * w + sx) * 4;
+
+      data[di] = lerp(data[di], past.data[si], a);
+      data[di + 1] = lerp(data[di + 1], past.data[si + 1], a);
+      data[di + 2] = lerp(data[di + 2], past.data[si + 2], a);
     }
   }
 
@@ -554,11 +634,9 @@ function markDone(reason = "DIST") {
   const t = dreamTimeStr();
   const sleep = sleepStageFromTarget(distTarget);
   setStatus(`STATE: DONE | SLEEP MODE: ${sleep} | DREAM TIME: ${t}`, true);
-
-  
 }
 
-// ---------------- Run reset (new image) ----------------
+// ---------------- Run reset ----------------
 
 function resetRunStateIfNewImage() {
   if (window.__ORIGINAL && window.__ORIGINAL !== lastOriginalRef) {
@@ -576,7 +654,11 @@ function resetRunStateIfNewImage() {
 
     samplerCooldown = 0;
     randomColorCooldown = 0;
-    edgeConfusionCooldown = 0; 
+    edgeConfusionCooldown = 0;
+
+    echoCooldown = 0;
+    echoStoreCounter = 0;
+    echoBuffer = [];
 
     hudPulseUntil = 0;
     hudPulseText = "";
@@ -621,8 +703,9 @@ function animate() {
     if (Math.random() < 0.2) agent.angle += (Math.random() - 0.5) * 0.3;
     if (Math.random() < 0.005) agent.angle = Math.random() * Math.PI * 2;
 
-    agent.x += Math.cos(agent.angle) * agent.speed;
-    agent.y += Math.sin(agent.angle) * agent.speed;
+    // ---- SLOWER motion (NEW)
+    agent.x += Math.cos(agent.angle) * agent.speed * TIME_SCALE;
+    agent.y += Math.sin(agent.angle) * agent.speed * TIME_SCALE;
 
     if (agent.x < 0 || agent.x > master.width)
       agent.angle = Math.PI - agent.angle;
@@ -643,11 +726,11 @@ function animate() {
     }
   }
 
-  // ---- Event agents: SourcePatch + RandomColor + EdgeConfusion
+  // ---- Event agents: SourcePatch + RandomColor + EdgeConfusion + TemporalEcho
 
   let didPatch = false;
-  if (samplerCooldown > 0) {
-    samplerCooldown--;
+  if (samplerCooldown > 0.001) {
+    samplerCooldown -= TIME_SCALE; 
   } else if (Math.random() < SAMPLER_CHANCE) {
     didPatch = applyOriginalPatchSampler(imgData);
     samplerCooldown = Math.floor(
@@ -658,8 +741,8 @@ function animate() {
   if (didPatch) pulseHud("SOURCE PATCH");
 
   let didColor = false;
-  if (randomColorCooldown > 0) {
-    randomColorCooldown--;
+  if (randomColorCooldown > 0.001) {
+    randomColorCooldown -= TIME_SCALE; 
   } else if (Math.random() < RANDOMCOLOR_CHANCE) {
     didColor = applyRandomColorBlob(imgData);
     randomColorCooldown = Math.floor(
@@ -670,10 +753,9 @@ function animate() {
   }
   if (didColor) pulseHud("RANDOM COLOR");
 
-  
   let didEdge = false;
-  if (edgeConfusionCooldown > 0) {
-    edgeConfusionCooldown--;
+  if (edgeConfusionCooldown > 0.001) {
+    edgeConfusionCooldown -= TIME_SCALE; 
   } else if (Math.random() < EDGE_CONFUSION_CHANCE) {
     didEdge = applyEdgeConfusion(imgData);
     edgeConfusionCooldown = Math.floor(
@@ -684,7 +766,21 @@ function animate() {
   }
   if (didEdge) pulseHud("EDGE CONFUSION");
 
+  let didEcho = false;
+  if (echoCooldown > 0.001) {
+    echoCooldown -= TIME_SCALE; 
+  } else if (Math.random() < ECHO_CHANCE) {
+    didEcho = applyTemporalEcho(imgData);
+    echoCooldown = Math.floor(
+      Math.random() * (ECHO_COOLDOWN_MAX - ECHO_COOLDOWN_MIN + 1) +
+        ECHO_COOLDOWN_MIN
+    );
+  }
+  if (didEcho) pulseHud("TEMPORAL ECHO");
+
   mctx.putImageData(imgData, 0, 0);
+
+  storeEchoFrame(imgData);
 
   if (typeof window.renderPreview === "function") {
     window.renderPreview();
@@ -738,6 +834,4 @@ function animate() {
 window.DM = window.DM || {};
 window.DM.getSleepMode = () => sleepStageFromTarget(distTarget);
 
-
 window.agents = agents;
-
